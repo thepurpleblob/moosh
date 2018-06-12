@@ -26,7 +26,7 @@ class DevBackup extends MooshCommand
         //$this->addArgument('id');
     }
 
-    private function course_backup($courseid) {
+    private function course_backup($courseid, $path) {
         global $CFG, $DB, $USER;
 
         require_once($CFG->dirroot . '/backup/util/includes/backup_includes.php');       
@@ -38,54 +38,27 @@ class DevBackup extends MooshCommand
 
         $options = $this->expandedOptions;
 
-        // TODO: change this to reflect correct save path
-        $cwd=$this->cwd;
-
         // TODO: update this to reflect correct destination filename
-        $filename = $cwd . '/backup_' . $courseid . "_". str_replace('/','_',$shortname) . '_' . date('Y.m.d') . '.mbz';
+        $filename = $path . '/backup_' . $courseid . "_". str_replace('/','_',$shortname) . '_' . date('Y.m.d') . '.mbz';
 
         //check if destination file does not exist and can be created
         if (file_exists($filename)) {
             cli_error("File '{$filename}' already exists, I will not over-write it.");
         }
 
-        $bc = new backup_controller(\backup::TYPE_1COURSE, $this->arguments[0], backup::FORMAT_MOODLE,
+        $bc = new backup_controller(\backup::TYPE_1COURSE, $courseid, backup::FORMAT_MOODLE,
             backup::INTERACTIVE_YES, backup::MODE_GENERAL, $USER->id);
 
-        if ($options['fullbackup']) {
-            $tasks = $bc->get_plan()->get_tasks();
-            foreach ($tasks as &$task) {
-                if ($task instanceof \backup_root_task) {
-                    $setting = $task->get_setting('logs');
-                    $setting->set_value('1');
-                    $setting = $task->get_setting('grade_histories');
-                    $setting->set_value('1');
-                } 
+        $tasks = $bc->get_plan()->get_tasks();
+        foreach ($tasks as &$task) {
+            if ($task instanceof \backup_root_task) {
+                //$setting = $task->get_setting('logs');
+                //$setting->set_value('1');
+                $setting = $task->get_setting('grade_histories');
+                $setting->set_value('1');
             } 
-        }
+        } 
 
-        if ($options['template']) {
-            $tasks = $bc->get_plan()->get_tasks();
-            foreach ($tasks as &$task) {
-                if ($task instanceof \backup_root_task) {
-                    $setting = $task->get_setting('users');
-                    $setting->set_value('0');
-                    $setting = $task->get_setting('anonymize');
-                    $setting->set_value('1');
-                    $setting = $task->get_setting('role_assignments');
-                    $setting->set_value('0');
-                    $setting = $task->get_setting('filters');
-                    $setting->set_value('0');
-                    $setting = $task->get_setting('comments');
-                    $setting->set_value('0');
-                    $setting = $task->get_setting('logs');
-                    $setting->set_value('0');
-                    $setting = $task->get_setting('grade_histories');
-                    $setting->set_value('0');
-                } 
-            } 
-        }
-        
         $bc->set_status(backup::STATUS_AWAITING);
         $bc->execute_plan();
         $result = $bc->get_results();
@@ -94,10 +67,10 @@ class DevBackup extends MooshCommand
             $file = $result['backup_destination'];
             /** @var $file stored_file */
 
-            if(!$file->copy_content_to($options['filename'])) {
-                cli_error("Problems copying final backup to '". $options['filename'] . "'");
+            if(!$file->copy_content_to($filename)) {
+                cli_error("Problems copying final backup to '". $filename . "'");
             } else {
-                printf("%s\n", $options['filename']);
+                printf("%s\n", $filename);
             }
         } else {
 	    echo $bc->get_backupid();
@@ -130,8 +103,14 @@ class DevBackup extends MooshCommand
 
         // Get courses waiting to be processed
         $rs = $DB->get_recordset('local_rollover', ['state' => ROLLOVER_COURSE_WAITING]);
-        $coursecount = iterator_count($rs);
-        echo("Number of courses remaining = $coursecount\n");
+        //$coursecount = iterator_count($rs);
+        //echo("Number of courses remaining = $coursecount\n");
+        //$rs->rewind();
+
+        foreach ($rs as $rollovercourse) {
+            echo "Creating backup. Course id = {$rollovercourse->id}\n";
+            self::course_backup($rollovercourse->id, $config->backupfilepath);
+        }
 
         $rs->close();
         

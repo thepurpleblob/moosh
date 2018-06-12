@@ -10,6 +10,7 @@ namespace Moosh\Command\Generic\Dev;
 use Moosh\MooshCommand;
 use backup_controller;
 use backup;
+use local_rollover\locallib;
 
 class DevBackup extends MooshCommand
 {
@@ -106,5 +107,33 @@ class DevBackup extends MooshCommand
     public function execute() {
         global $CFG, $DB, $USER;
 
+        require_once($CFG->dirroot . '/local/rollover/classes/locallib.php');       
+
+        // Get/check config set up in local_rollover 
+        $config = get_config('local_rollover');
+        if (!$config->enable) {
+            echo("Rollover is not currently enabled\n");
+            die;
+        }
+        if (!$config->destinationcategory) {
+            echo("Cannot execute rollover. Destination category not defined\n");
+            die;
+        }
+        if (!$config->appendtext && !$config->prependtext) {
+            echo("Cannot execute rollover. One of prepend/append text must be defined\n");
+            die;
+        }
+        if (!$config->shortprependtext) {
+            echo("Cannot execute rollover. Short name prepend text not defined\n");
+            die;
+        }
+
+        // Get courses waiting to be processed
+        $rs = $DB->get_recordset('local_rollover', ['state' => ROLLOVER_COURSE_WAITING]);
+        $coursecount = iterator_count($rs);
+        echo("Number of courses remaining = $coursecount\n");
+
+        $rs->close();
+        
     }
 }

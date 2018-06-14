@@ -17,13 +17,6 @@ class DevBackup extends MooshCommand
     public function __construct()
     {
         parent::__construct('backup', 'dev');
-
-        //$this->addOption('f|filename:', 'path to filename to save the course backup');
-        //$this->addOption('p|path:', 'path to save the course backup');
-        //$this->addOption('F|fullbackup', 'do full backup instead of general');
-        //$this->addOption('template', 'do template backup instead of general');
-
-        //$this->addArgument('id');
     }
 
     private function course_backup($courseid, $path) {
@@ -38,12 +31,12 @@ class DevBackup extends MooshCommand
 
         $options = $this->expandedOptions;
 
-        // TODO: update this to reflect correct destination filename
         $filename = $path . '/backup_' . $courseid . "_". str_replace('/','_',$shortname) . '_' . date('Y.m.d') . '.mbz';
 
         //check if destination file does not exist and can be created
         if (file_exists($filename)) {
-            cli_error("File '{$filename}' already exists, I will not over-write it.");
+            echo("File '{$filename}' already exists, deleting.\n");
+            unlink($filename);
         }
 
         $bc = new backup_controller(\backup::TYPE_1COURSE, $courseid, backup::FORMAT_MOODLE,
@@ -77,6 +70,16 @@ class DevBackup extends MooshCommand
         }
     }
 
+    private function update_state($id, $status) {
+        global $DB;
+ 
+        $ro = $DB->get_record('local_rollover', ['id' => $id], '*', MUST_EXIST);
+        $ro->state = $status;
+        $DB->update_record('local_rollover', $ro);
+
+        return $ro;
+    }
+
     public function execute() {
         global $CFG, $DB, $USER;
 
@@ -102,15 +105,33 @@ class DevBackup extends MooshCommand
         }
 
         // Get courses waiting to be processed
+        $coursecount = $DB->count_records('local_rollover', ['state' => ROLLOVER_COURSE_WAITING]);
         $rs = $DB->get_recordset('local_rollover', ['state' => ROLLOVER_COURSE_WAITING]);
-        //$coursecount = iterator_count($rs);
-        //echo("Number of courses remaining = $coursecount\n");
-        //$rs->rewind();
+        echo("Number of courses remaining = $coursecount\n");
 
-        foreach ($rs as $rollovercourse) {
-            echo "Creating backup. Course id = {$rollovercourse->id}\n";
-            self::course_backup($rollovercourse->id, $config->backupfilepath);
+        // Note starting time for limit
+        $starttime = time();
+        if (!$config->timelimit) {
+            $config->timelimit = 240; // Default = 4 hours;
         }
+        $endtime = $starttime + (60 * $config->timelimit);
+        echo("Starting at backups at " . date('H:s', $starttime) . "\n");
+
+        $count = 0;
+        foreach ($rs as $rollovercourse) {
+            echo "Creating backup. Course id = {$rollovercourse->courseid}\n";
+            self::course_backup($rollovercourse->courseid, $config->backupfilepath);
+            self::update_state($rollovercourse->id, ROLLOVER_COURSE_BACKUP);
+            $count++;
+
+            // Check if our time is up
+            if (time() > $endtime) {
+                echo("Time limit exceeded\n");
+                break;
+            }
+        }
+        echo("$count courses has been backed up\n");
+        echo("Completed this set of backups at " . date('H:s', time()) . "\n");
 
         $rs->close();
         

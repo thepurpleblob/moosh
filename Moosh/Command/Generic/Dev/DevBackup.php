@@ -19,10 +19,17 @@ class DevBackup extends MooshCommand
         parent::__construct('backup', 'dev');
     }
 
-    private function course_backup($courseid, $path) {
+    private function course_backup($courseid, $path, $session) {
         global $CFG, $DB, $USER;
 
         require_once($CFG->dirroot . '/backup/util/includes/backup_includes.php');       
+
+        // Create directory if it doesn't already exists
+        $directory = $path . '/' . $session;
+        if (!file_exists($directory)) {
+            echo("Creating new directory '$directory'\n");
+            mkdir($directory);
+        }
 
         //check if course id exists
         $course = $DB->get_record('course', array('id' => $courseid), '*', MUST_EXIST);
@@ -31,7 +38,7 @@ class DevBackup extends MooshCommand
 
         $options = $this->expandedOptions;
 
-        $filename = $path . '/backup_' . $courseid . "_". str_replace('/','_',$shortname) . '_' . date('Y.m.d') . '.mbz';
+        $filename = $directory . '/backup_' . $courseid . "_". str_replace('/','_',$shortname) . '_' . date('Y.m.d') . '.mbz';
 
         //check if destination file does not exist and can be created
         if (file_exists($filename)) {
@@ -95,6 +102,10 @@ class DevBackup extends MooshCommand
             echo("Cannot execute rollover. Destination category not defined\n");
             die;
         }
+        if (!$config->session) {
+            echo("Cannot execute rollover. Session is not defined\n");
+            die;
+        }
         if (!$config->appendtext && !$config->prependtext) {
             echo("Cannot execute rollover. One of prepend/append text must be defined\n");
             die;
@@ -105,8 +116,8 @@ class DevBackup extends MooshCommand
         }
 
         // Get courses waiting to be processed
-        $coursecount = $DB->count_records('local_rollover', ['state' => ROLLOVER_COURSE_WAITING]);
-        $rs = $DB->get_recordset('local_rollover', ['state' => ROLLOVER_COURSE_WAITING]);
+        $coursecount = $DB->count_records('local_rollover', ['session' => $config->session, 'state' => ROLLOVER_COURSE_WAITING]);
+        $rs = $DB->get_recordset('local_rollover', ['session' => $config->session, 'state' => ROLLOVER_COURSE_WAITING]);
         echo("Number of courses remaining = $coursecount\n");
 
         // Note starting time for limit
@@ -120,7 +131,7 @@ class DevBackup extends MooshCommand
         $count = 0;
         foreach ($rs as $rollovercourse) {
             echo "Creating backup. Course id = {$rollovercourse->courseid}\n";
-            self::course_backup($rollovercourse->courseid, $config->backupfilepath);
+            self::course_backup($rollovercourse->courseid, $config->backupfilepath, $config->session);
             self::update_state($rollovercourse->id, ROLLOVER_COURSE_BACKUP);
             $count++;
 
